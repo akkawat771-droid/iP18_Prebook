@@ -139,9 +139,11 @@ body { padding: 20px 24px 60px; }
 .card .card-sub { font-size:11.5px; color:var(--text-muted); margin-bottom:10px; }
 .grid-2 { display:grid; grid-template-columns:1.4fr 1fr; gap:16px; }
 .grid-2b { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+.grid-3b { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 .grid-4b { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
-@media (max-width:1000px) { .grid-2, .grid-2b, .grid-4b { grid-template-columns:1fr; } }
-.grid-2 > *, .grid-2b > *, .grid-4b > *, .stack-col > * { min-width:0; }
+@media (max-width:1000px) { .grid-2, .grid-2b, .grid-3b, .grid-4b { grid-template-columns:1fr; } }
+@media (max-width:1300px) and (min-width:1001px) { .grid-3b { grid-template-columns:1fr 1fr; } }
+.grid-2 > *, .grid-2b > *, .grid-3b > *, .grid-4b > *, .stack-col > * { min-width:0; }
 .stack-col { display:flex; flex-direction:column; gap:16px; min-width:0; }
 
 .legend-row { display:flex; gap:14px; flex-wrap:wrap; margin-top:8px; font-size:12px; color:var(--text-secondary); }
@@ -904,6 +906,30 @@ function renderOverview(){
         </div>
       </div>
 
+      <div class="section-title">วิเคราะห์ยอดจองตามรุ่น / ความจุ / สี<span class="hint">Model / Capacity / Color Breakdown</span></div>
+      <div class="grid-3b">
+        <div class="card">
+          <h3>แยกตามรุ่น (Model)</h3>
+          <div class="card-sub">จำนวนและสัดส่วนของยอดจองทั้งหมด</div>
+          <div id="ov-modelBreak"></div>
+        </div>
+        <div class="card">
+          <h3>แยกตามความจุ (Capacity)</h3>
+          <div class="card-sub">จำนวนและสัดส่วนของยอดจองทั้งหมด</div>
+          <div id="ov-capacityBreak"></div>
+        </div>
+        <div class="card">
+          <h3>แยกตามสี (Color)</h3>
+          <div class="card-sub">จำนวนและสัดส่วนของยอดจองทั้งหมด</div>
+          <div id="ov-colorBreak"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Top 10 รุ่น + ความจุ + สี ที่นิยมมากที่สุด</h3>
+        <div class="card-sub">จับคู่ 3 มิติเพื่อดูสเปกที่ลูกค้าเลือกมากที่สุด</div>
+        <div id="ov-comboRank"></div>
+      </div>
+
       <div class="section-title">ตารางข้อมูลสาขา (Shop Performance)</div>
       <div class="card">
         <div class="table-toolbar">
@@ -985,6 +1011,23 @@ function renderOverview(){
   const byModel = U.groupBy(bks, b=>b._model);
   const modelRows = Object.entries(byModel).map(([m,arr],i)=>({ label:m, value: arr.reduce((a,b)=>a+b._qty,0), color: U.SERIES[i%U.SERIES.length] })).sort((a,b)=>b.value-a.value);
   U.donutChart(document.getElementById('ov-modelDonut'), modelRows, { emptyText:'ยังไม่มีรายการจองในเงื่อนไขนี้' });
+
+  // Model / Capacity / Color breakdown (detailed lists below the donut)
+  U.hbarList(document.getElementById('ov-modelBreak'), modelRows, { emptyText:'ยังไม่มีรายการจองในเงื่อนไขนี้' });
+
+  const byCapacity = U.groupBy(bks, b=>b.Capacity||'ไม่ระบุความจุ');
+  const capacityRows = Object.entries(byCapacity).map(([c,arr],i)=>({ label:c, value: arr.reduce((a,b)=>a+b._qty,0), color: U.SERIES[i%U.SERIES.length] })).sort((a,b)=>b.value-a.value);
+  U.hbarList(document.getElementById('ov-capacityBreak'), capacityRows, { emptyText:'ยังไม่มีรายการจองในเงื่อนไขนี้' });
+
+  const byColor = U.groupBy(bks, b=>b.Color||'ไม่ระบุสี');
+  const colorRows = Object.entries(byColor).map(([c,arr],i)=>({ label:c, value: arr.reduce((a,b)=>a+b._qty,0), color: U.SERIES[i%U.SERIES.length] })).sort((a,b)=>b.value-a.value);
+  U.hbarList(document.getElementById('ov-colorBreak'), colorRows, { emptyText:'ยังไม่มีรายการจองในเงื่อนไขนี้' });
+
+  // Top Model + Capacity + Color combinations
+  const byCombo = U.groupBy(bks, b=>`${b._model} · ${b.Capacity||'ไม่ระบุความจุ'} · ${b.Color||'ไม่ระบุสี'}`);
+  const comboRows = Object.entries(byCombo).map(([k,arr])=>({ label:k, value: arr.reduce((a,b)=>a+b._qty,0), color:'var(--series-1)' }))
+    .sort((a,b)=>b.value-a.value).slice(0,10);
+  U.rankList(document.getElementById('ov-comboRank'), comboRows, { emptyText:'ยังไม่มีรายการจองในเงื่อนไขนี้' });
 
   // Top 20 shops by target
   const topShops = shops.slice().sort((a,b)=>b.target-a.target).slice(0,20).map(s=>{
