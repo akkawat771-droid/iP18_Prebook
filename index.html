@@ -261,8 +261,30 @@ tbody tr:hover td { background:var(--page-plane); }
 .empty-state { text-align:center; padding:30px 10px; color:var(--text-muted); font-size:13px; }
 footer { text-align:center; color:var(--text-muted); font-size:11.5px; margin-top:30px; }
 
-/* Velocity pivot heat-table (A1_QTY / BY Shop style) */
-.vtable-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:10px; }
+/* Velocity pivot heat-table (A1_QTY / BY Shop style) — these tables are wide (dim columns +
+   Sale/Stock/Velocity x N models), so horizontal scroll is unavoidable at most screen widths.
+   Made deliberately more visible below: an always-on styled scrollbar plus a soft edge shadow
+   that only shows on a side with more content to scroll, so it reads as "scroll for more" rather
+   than content being cut off. */
+.vtable-wrap {
+  position:relative; overflow-x:auto; border:1px solid var(--border); border-radius:10px;
+  scrollbar-width:thin; scrollbar-color:var(--baseline) transparent;
+  background-color:var(--surface-2);
+  background-image:
+    linear-gradient(to right, var(--surface-2), var(--surface-2)),
+    linear-gradient(to left, var(--surface-2), var(--surface-2)),
+    linear-gradient(to right, color-mix(in srgb, var(--text-primary) 18%, transparent), transparent),
+    linear-gradient(to left, color-mix(in srgb, var(--text-primary) 18%, transparent), transparent);
+  background-position: left center, right center, left center, right center;
+  background-repeat: no-repeat;
+  background-size: 20px 100%, 20px 100%, 10px 100%, 10px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+.vtable-wrap::-webkit-scrollbar { height:9px; }
+.vtable-wrap::-webkit-scrollbar-track { background:var(--page-plane); }
+.vtable-wrap::-webkit-scrollbar-thumb { background:var(--baseline); border-radius:5px; }
+.vtable-wrap::-webkit-scrollbar-thumb:hover { background:var(--text-muted); }
+.vtable-scroll-hint { display:flex; align-items:center; gap:5px; font-size:11.5px; color:var(--text-muted); }
 table.vtable { width:100%; border-collapse:collapse; font-size:11.5px; min-width:640px; }
 table.vtable th, table.vtable td { padding:6px 9px; text-align:right; white-space:nowrap; border:1px solid var(--gridline); }
 table.vtable thead tr.grp th { text-align:center; font-size:10.5px; font-weight:700; text-transform:uppercase;
@@ -653,6 +675,11 @@ function pivotTable(container, rows, models, opts){
   opts = opts || {};
   if(!rows || !rows.length){ container.innerHTML = emptyState(opts.emptyText); return; }
 
+  // Sortable headers (including the Total columns), same interaction as pivotTableSortable's
+  // BY SHOP table — but rows here are few enough that no pagination is needed, and the summary
+  // TOTAL row always stays pinned at the bottom rather than participating in the sort.
+  const state = { sortKey: opts.defaultSort || 'totalQty', sortDir: opts.defaultDir || 'desc' };
+
   function withPct(r){
     const models2 = {};
     models.forEach(m=>{
@@ -663,6 +690,12 @@ function pivotTable(container, rows, models, opts){
     const totalPct = (r.totalQty+r.totalBalance)>0 ? r.totalQty/(r.totalQty+r.totalBalance)*100 : 0;
     return Object.assign({}, r, { byModel: models2, totalPct });
   }
+
+  // Precompute totalPct onto each row up front so it can be sorted on, same as totalQty/totalBalance.
+  const rowsWithPct = rows.map(r=>{
+    const totalPct = (r.totalQty+r.totalBalance)>0 ? r.totalQty/(r.totalQty+r.totalBalance)*100 : 0;
+    return Object.assign({}, r, { totalPct });
+  });
 
   const totalRow = { label: opts.totalLabel || 'TOTAL', byModel:{}, totalQty:0, totalBalance:0 };
   models.forEach(m=> totalRow.byModel[m] = { qty:0, balance:0 });
@@ -687,22 +720,53 @@ function pivotTable(container, rows, models, opts){
     return html;
   }
 
-  const saleSpan = models.length+1, stockSpan = models.length+1, velSpan = models.length+1;
-  const theadGrp = `<tr class="grp">
-    <th></th>
-    <th class="grp-sale" colspan="${saleSpan}">Sale QTY</th>
-    <th class="grp-stock" colspan="${stockSpan}">Stock (Balance)</th>
-    <th class="grp-velocity" colspan="${velSpan}">Velocity</th>
-  </tr>`;
-  const modelHeadersShort = models.map(m=>`<th>${escapeHtml(m)}</th>`).join('');
-  const theadSub = `<tr class="sub">
-    <th class="dim">${escapeHtml(opts.dimLabel||'')}</th>
-    ${modelHeadersShort}<th>Total</th>
-    ${modelHeadersShort}<th>Total</th>
-    ${modelHeadersShort}<th>Total</th>
-  </tr>`;
-  const tbody = rows.map(r=>rowHtml(r,false)).join('') + rowHtml(totalRow, true);
-  container.innerHTML = `<div class="vtable-wrap"><table class="vtable"><thead>${theadGrp}${theadSub}</thead><tbody>${tbody}</tbody></table></div>`;
+  function getSorted(){
+    const arr = rowsWithPct.slice();
+    arr.sort((a,b)=>{
+      let va = a[state.sortKey], vb = b[state.sortKey];
+      if(typeof va === 'string') va = va.toLowerCase();
+      if(typeof vb === 'string') vb = vb.toLowerCase();
+      if(va===undefined||va===null) va = '';
+      if(vb===undefined||vb===null) vb = '';
+      if(va<vb) return state.sortDir==='asc'?-1:1;
+      if(va>vb) return state.sortDir==='asc'?1:-1;
+      return 0;
+    });
+    return arr;
+  }
+
+  function sortTh(key, label){
+    const arrow = state.sortKey===key ? (state.sortDir==='asc'?'↑':'↓') : '↕';
+    return `<th class="sortable" data-key="${key}">${escapeHtml(label)} <span class="arrow">${arrow}</span></th>`;
+  }
+
+  function render(){
+    const saleSpan = models.length+1, stockSpan = models.length+1, velSpan = models.length+1;
+    const theadGrp = `<tr class="grp">
+      <th></th>
+      <th class="grp-sale" colspan="${saleSpan}">Sale QTY</th>
+      <th class="grp-stock" colspan="${stockSpan}">Stock (Balance)</th>
+      <th class="grp-velocity" colspan="${velSpan}">Velocity</th>
+    </tr>`;
+    const modelHeadersShort = models.map(m=>`<th>${escapeHtml(m)}</th>`).join('');
+    const theadSub = `<tr class="sub">
+      ${sortTh('label', opts.dimLabel||'')}
+      ${modelHeadersShort}${sortTh('totalQty','Total')}
+      ${modelHeadersShort}${sortTh('totalBalance','Total')}
+      ${modelHeadersShort}${sortTh('totalPct','Total')}
+    </tr>`;
+    const tbody = getSorted().map(r=>rowHtml(r,false)).join('') + rowHtml(totalRow, true);
+    container.innerHTML = `<div class="vtable-wrap"><table class="vtable"><thead>${theadGrp}${theadSub}</thead><tbody>${tbody}</tbody></table></div>`;
+    container.querySelectorAll('thead th.sortable').forEach(th=>{
+      th.addEventListener('click', ()=>{
+        const key = th.dataset.key;
+        if(state.sortKey===key) state.sortDir = state.sortDir==='asc' ? 'desc' : 'asc';
+        else { state.sortKey = key; state.sortDir = key==='label' ? 'asc' : 'desc'; }
+        render();
+      });
+    });
+  }
+  render();
 }
 
 // Sortable + paginated version for shop-level velocity table.
@@ -1846,7 +1910,7 @@ function renderVelocity(){
       <div class="section-title">ตารางข้อมูลสาขา (BY SHOP)<span class="hint">สไตล์ BY Shop (QTY)</span></div>
       <div class="card">
         <div class="table-toolbar">
-          <div></div>
+          <span class="vtable-scroll-hint">&#8596; เลื่อนดูคอลัมน์อื่นได้ในตาราง</span>
           <div style="display:flex;align-items:center;gap:10px;">
             <span class="match-count" id="vl-shopCount"></span>
             <button class="chip-toggle" id="vl-exportShops">&#8681; Export CSV</button>
